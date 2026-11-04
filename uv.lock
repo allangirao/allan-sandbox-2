@@ -1,0 +1,13 @@
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[[package]]
+name = "airline-core"
+version = "0.1.0"
+source = { editable = "." }
+
+[[package]]
+name = "alembic"
+version = "1.16.4"
+source = { registry = "https://pypi.org/simple" }
