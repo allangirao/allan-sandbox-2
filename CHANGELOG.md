@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.1 (2026-11-05)
+
+### Fixes
+
+- correct the footer (#105)
+
 ## v0.2.0 (2026-11-05)
 
 ### Features
