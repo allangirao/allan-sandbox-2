@@ -1,0 +1,29 @@
+name: PR title
+
+# A PR title becomes a client-facing changelog line (tools/release/release.py), so it is checked
+# like code: a Conventional Commit type, ASCII only, no ticket numbers, no client or airline names. A support
+# line (support/vX.Y) ships patches only, so a PR into one may not be a feature or breaking.
+# A Release PR (main into release) takes any title: the release lists the PRs it brings, never it.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+    branches: [main, release, "support/v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    name: PR title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          # Comma-separated names; an Actions variable so the names themselves never enter the repo.
+          CHANGELOG_DENYLIST: ${{ vars.CHANGELOG_DENYLIST }}
+        run: python3 tools/release/release.py check-title --base "$BASE_REF" --head "$HEAD_REF" -- "$TITLE"

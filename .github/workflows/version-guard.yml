@@ -1,0 +1,27 @@
+name: Version guard
+
+# The version in pyproject.toml and uv.lock is written by the release workflows alone, with the deploy
+# key, never through a PR. This refuses a PR whose merge commit states another version than the branch
+# it merges into, unless it is the newest release tag the merge commit contains: a back-merge, or a
+# Release PR, bringing in a release the base lacks. tools/release/release.py check-version compares.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main, release, "support/v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Version unchanged
+    runs-on: ubuntu-latest
+    steps:
+      # The PR's merge commit, its first parent (the tip of the branch it merges into) and every tag.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: The PR leaves the version alone
+        run: python3 tools/release/release.py check-version
