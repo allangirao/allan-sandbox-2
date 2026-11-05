@@ -1,0 +1,9 @@
+[project]
+name = "airline-core"
+# Written only by a release (tools/release/release.py set-version); the Version guard refuses a PR that edits it.
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
