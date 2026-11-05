@@ -1,0 +1,111 @@
+name: Release
+
+# Merging a PR into release publishes a version. tools/release/release.py plan resolves the next
+# vX.Y.Z and the notes from the titles of the PRs reachable from release but not from the last tag;
+# the notes go into CHANGELOG.md and the version into pyproject.toml and uv.lock in one commit, which is
+# tagged with the deploy key and the release published on the tag, and release is back-merged into
+# main so main's builds report the new version too.
+# Nothing is built: there is no registry yet.
+#
+# Pushes go over SSH with a deploy key (secrets.RELEASE_DEPLOY_KEY, write access) that the
+# release and main rulesets let bypass them: GITHUB_TOKEN can push to neither, and its pushes
+# would not trigger the workflows that run on main. See docs/releasing/github-setup.md.
+on:
+  push:
+    branches: [release]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Release
+    # The bot's own changelog commit lands on release too; it must not release again.
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    steps:
+      # The branch tip, not the pushed commit: a run queued behind another starts from that run's
+      # changelog commit, so it neither releases the same PR twice nor fails its own push. Counting
+      # from the last tag also means a run that never happened or failed loses nothing.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+
+      - name: Anything to release?
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # The plan re-checks the titles it lists: one edited after merging never met the PR title check.
+          CHANGELOG_DENYLIST: ${{ vars.CHANGELOG_DENYLIST }}
+        run: |
+          # A run that pushed its tag but failed to publish the release: publish that tag, plan nothing new.
+          tag="$(git tag --points-at HEAD --list 'v*' | head -n 1)"
+          if [ -n "$tag" ] && ! gh release view "$tag" > /dev/null 2>&1; then
+            version="${tag#v}"
+            python3 tools/release/release.py changelog-section "$version" > "$RUNNER_TEMP/notes.md"
+          else
+            version="$(python3 tools/release/release.py plan "$RUNNER_TEMP/notes.md")"
+          fi
+          if [ -z "$version" ]; then
+            echo "::notice::Nothing to release: no feat: or fix: PR since the last release."
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Commit the changelog, publish the release
+        if: steps.plan.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          # A re-run after a failed publish starts from its own changelog commit: publish that, don't add another.
+          if [ "$(git log -1 --format=%s)" != "chore(release): v$VERSION" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            python3 tools/release/release.py changelog "$VERSION" "$RUNNER_TEMP/notes.md"
+            python3 tools/release/release.py set-version "$VERSION"
+            git add -u
+            git add CHANGELOG.md
+            git commit -m "chore(release): v$VERSION"
+            git push origin HEAD:release
+          fi
+          # The deploy key pushes the tag, since the v* tag ruleset lets only deploy keys create one.
+          if ! git rev-parse -q --verify "refs/tags/v$VERSION" > /dev/null; then
+            git tag "v$VERSION" HEAD
+            git push origin "refs/tags/v$VERSION"
+          fi
+          gh release create "v$VERSION" --verify-tag --title "v$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" --latest
+
+      - name: Back-merge into main
+        if: steps.plan.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: v${{ steps.plan.outputs.version }}
+        run: |
+          released="$(git rev-parse HEAD)"
+          git fetch origin main
+          git switch --detach origin/main
+          if git merge --no-ff -m "chore(release): back-merge $TAG into main" "$released"; then
+            git push origin HEAD:main
+            exit 0
+          fi
+          git merge --abort
+          branch="release-backmerge/$TAG"
+          git push origin "$released:refs/heads/$branch"
+          # Needs "Allow GitHub Actions to create and approve pull requests"; without it, open the PR by hand.
+          gh pr create --base main --head "$branch" \
+            --title "chore: back-merge $TAG into main" \
+            --body "main changed the same code as $TAG. Resolve the conflict and merge this with a merge commit, never a squash, before the next release: until main contains $TAG, its builds still report the previous version." \
+            || echo "::warning::Could not open the back-merge PR; open one from $branch into main by hand."
+          echo "::error::$TAG is published, but the back-merge into main conflicts; resolve $branch into main."
+          exit 1

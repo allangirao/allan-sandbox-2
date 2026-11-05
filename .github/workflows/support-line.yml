@@ -1,0 +1,61 @@
+name: Start a support line
+
+# Opens support/vX.Y at the line's highest tag, so the line can keep shipping patches after main
+# has moved on (docs/releasing/developer-guide.md). The newest line is refused: it is patched
+# through release. A tag older than this tooling carries no support workflows, and a push runs the
+# workflows of the branch it lands on, so a line cut from one gets a commit adding them. It keeps
+# its own PR checks, which match its code (today's release image checks would fail on an old
+# Dockerfile); they only learn to run on PRs into the line.
+on:
+  workflow_dispatch:
+    inputs:
+      line:
+        description: "The line to support, MAJOR.MINOR (e.g. 0.2)"
+        required: true
+        type: string
+
+concurrency:
+  group: support-line
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  start:
+    name: Start the support line
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+
+      - name: Create the branch
+        env:
+          LINE: ${{ inputs.line }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Validates LINE before it reaches a branch name, and refuses the newest line.
+          base="$(python3 tools/release/release.py support-base "$LINE")"
+          branch="support/v$LINE"
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            echo "::error::$branch already exists."
+            exit 1
+          fi
+          tooling="$(git rev-parse HEAD)"
+          git switch --detach "$base"
+          if [ ! -f .github/workflows/support-release.yml ]; then
+            sed -i 's|^    branches: \[main|    branches: ["support/v*", main|' .github/workflows/pr.yml
+            if ! grep -q '"support/v\*"' .github/workflows/pr.yml; then
+              echo "::error::$base's pr.yml has no pull_request branches list to add support/v* to."
+              exit 1
+            fi
+            git checkout "$tooling" -- .github/workflows/pr-title.yml .github/workflows/release-pr.yml \
+              .github/workflows/support-release.yml .github/workflows/version-guard.yml tools/release
+            git commit -q -am "chore: release tooling for the v$LINE support line"
+          fi
+          git push origin "HEAD:refs/heads/$branch"
+          echo "::notice::$branch starts at $base. Patch it with hotfix/* PRs titled fix:."
