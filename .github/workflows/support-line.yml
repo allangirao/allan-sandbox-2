@@ -1,0 +1,67 @@
+name: Start a support line
+
+# Opens support/vX.Y at the line's highest tag, adding the release tooling an older tag lacks.
+on:
+  workflow_dispatch:
+    inputs:
+      line:
+        description: "The line to support, MAJOR.MINOR (e.g. 0.2)"
+        required: true
+        type: string
+
+concurrency:
+  group: support-line
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  start:
+    name: Start the support line
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+
+      - name: Create the branch
+        env:
+          LINE: ${{ inputs.line }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Validates LINE before it reaches a branch name, and refuses the newest line.
+          base="$(python3 tools/release/release.py support-base "$LINE")"
+          branch="support/v$LINE"
+          # A line is started once and then patched any number of times, so starting it again is not an error.
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            git fetch -q origin "$branch"
+            latest="$(git describe --tags --abbrev=0 --match "v$LINE.*" FETCH_HEAD)"
+            echo "::notice::$branch already exists, at $latest. Patch it again with a hotfix/* PR titled fix: into $branch."
+            exit 0
+          fi
+          tooling="$(git rev-parse HEAD)"
+          git switch --detach "$base"
+          if [ ! -f .github/workflows/support-release.yml ]; then
+            git checkout "$tooling" -- .github/workflows/pr-title.yml .github/workflows/release-pr.yml \
+              .github/workflows/support-release.yml .github/workflows/version-guard.yml tools/release
+          fi
+          pr=.github/workflows/pr.yml
+          if [ ! -f "$pr" ]; then
+            echo "::notice::$base has no pr.yml, so the line's PRs run the release checks only."
+          elif ! grep -q '"support/v\*"' "$pr"; then
+            sed -i 's|^    branches: \[main|    branches: ["support/v*", main|' "$pr"
+            if ! grep -q '"support/v\*"' "$pr"; then
+              echo "::error::$base's pr.yml has no pull_request branches list to add support/v* to."
+              exit 1
+            fi
+            git add "$pr"
+          fi
+          if ! git diff --cached --quiet; then
+            git commit -q -m "chore: release tooling for the v$LINE support line"
+          fi
+          git push origin "HEAD:refs/heads/$branch"
+          echo "::notice::$branch starts at $base. Patch it with hotfix/* PRs titled fix:."
