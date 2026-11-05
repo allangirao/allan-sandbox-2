@@ -1,0 +1,73 @@
+name: Release
+
+# Merging into release publishes a version, then back-merges it into main; see docs/releasing/developer-guide.md.
+on:
+  push:
+    branches: [release]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Release
+    # The bot's own changelog commit lands on release too; it must not release again.
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    steps:
+      # The branch tip, not the pushed commit, so a run queued behind another starts from its changelog commit.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          # The release and main rulesets let only this deploy key push (docs/releasing/github-setup.md).
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+
+      - name: Publish what release merged since its last tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # The release re-checks the titles it lists: one edited after merging never met the PR title check.
+          CHANGELOG_DENYLIST: ${{ vars.CHANGELOG_DENYLIST }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 tools/release/release.py publish release "$RUNNER_TEMP/notes.md"
+
+      # Runs whatever was published, so a re-run redoes a back-merge an earlier run could not push.
+      - name: Back-merge into main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="$(git tag --merged HEAD --list 'v*' --sort=-v:refname | head -n 1)"
+          git fetch origin main
+          if git merge-base --is-ancestor "$tag" origin/main; then
+            exit 0
+          fi
+          released="$(git rev-parse HEAD)"
+          git switch --detach origin/main
+          if git merge --no-ff -m "chore(release): back-merge $tag into main" "$released" \
+            && git push origin HEAD:main; then
+            exit 0
+          fi
+          git merge --abort 2> /dev/null || true
+          branch="release-backmerge/$tag"
+          # Someone may be resolving it there: leave their branch alone.
+          if [ "$(gh pr view "$branch" --json state --jq .state 2> /dev/null)" = OPEN ]; then
+            echo "::warning::$tag is not in main yet; merge the open PR from $branch."
+            exit 0
+          fi
+          git push --force origin "$released:refs/heads/$branch"
+          # Needs "Allow GitHub Actions to create and approve pull requests"; without it, open the PR by hand.
+          gh pr create --base main --head "$branch" \
+            --title "chore: back-merge $tag into main" \
+            --body "The release workflow could not merge $tag into main. Resolve any conflict and merge this with a merge commit, never a squash, before the next release: until main contains $tag, its builds still report the previous version." \
+            || echo "::warning::Could not open the back-merge PR; open one from $branch into main by hand."
+          echo "::error::$tag is published, but its back-merge into main failed; merge $branch into main."
+          exit 1
