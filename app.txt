@@ -6,4 +6,4 @@ farewell: goodbye
 
 ---
 
-footer: the end
+footer: The End
