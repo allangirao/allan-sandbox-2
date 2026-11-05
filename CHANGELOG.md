@@ -1,0 +1,14 @@
+# Changelog
+
+## v0.2.0 (2026-11-05)
+
+### Features
+
+- release tooling (#112)
+
+### Fixes
+
+- parse snake\_case ids (#117)
+- handle `snake_case` keys (#116)
+- add greeting (#115)
+- decode UTF-8 bodies (#114)
