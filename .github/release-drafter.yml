@@ -1,0 +1,18 @@
+# Only the autolabeler runs (release-drafter.yml): it turns each Conventional Commit title into
+# the label that names its bump. The version and notes come from the titles themselves, in
+# tools/release/release.py, which also holds the sections, the excluded labels and the escapes.
+# Types match in any case (`Feat:` as well as `feat:`), here and in release.py.
+
+# Required by release-drafter's config schema even with the releaser off.
+template: |
+  $CHANGES
+
+autolabeler:
+  - label: major
+    title: ['/^[a-z]+(\([^)]*\))?!: /i']
+  - label: minor
+    title: ['/^feat(\([^)]*\))?: /i']
+  - label: patch
+    title: ['/^fix(\([^)]*\))?: /i']
+  - label: skip-changelog
+    title: ['/^(chore|ci|docs|refactor|test|build|perf|revert)(\([^)]*\))?: /i']
