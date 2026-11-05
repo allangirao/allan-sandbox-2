@@ -1,0 +1,89 @@
+name: Release PR
+
+# A PR into release or a support line gets the version and changelog merging it publishes as its description.
+on:
+  pull_request:
+    # labeled/unlabeled: the internal label decides whether a PR publishes anything.
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+    branches: [release, "support/v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    name: Release preview
+    runs-on: ubuntu-latest
+    # Read-only: this job runs the PR's own release.py, so its token must not be able to write or approve.
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      body: ${{ steps.preview.outputs.body }}
+    steps:
+      - name: Only main or a hotfix branch may merge into release, only a hotfix into a support line
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          case "$BASE_REF:$HEAD_REF" in
+            release:main | release:hotfix/* | support/*:hotfix/*) ;;
+            release:*) echo "::error::release only takes PRs from main or hotfix/*, not $HEAD_REF"; exit 1 ;;
+            *) echo "::error::$BASE_REF only takes PRs from hotfix/*, not $HEAD_REF"; exit 1 ;;
+          esac
+
+      # The PR's merge commit with every tag: both previews count from the last tag it contains.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Work out the release
+        id: preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # The plan re-checks the titles it lists: one edited after merging never met the PR title check.
+          CHANGELOG_DENYLIST: ${{ vars.CHANGELOG_DENYLIST }}
+          PR: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [ "$BASE_REF" != release ]; then
+            python3 tools/release/release.py support-preview --labels "$LABELS" -- "$BASE_REF" "$TITLE" "$PR" > "$RUNNER_TEMP/body.md"
+          else
+            pending=()
+            if [ "$HEAD_REF" != main ]; then
+              # A hotfix is not merged yet, so no commit names it: count it in by hand.
+              pending=(--pr "$PR" --title="$TITLE" --labels "$LABELS" --head "$HEAD_REF")
+            fi
+            version="$(python3 tools/release/release.py plan "${pending[@]}" "$RUNNER_TEMP/notes.md")"
+            if [ -z "$version" ]; then
+              printf 'Nothing to release: no PR that ships since the last release. Merging this tags nothing.\n' > "$RUNNER_TEMP/body.md"
+            else
+              {
+                printf '## Merging this publishes v%s\n\n' "$version"
+                printf 'Changelog, exactly as it will be published:\n\n'
+                cat "$RUNNER_TEMP/notes.md"
+              } > "$RUNNER_TEMP/body.md"
+            fi
+          fi
+          delimiter="EOF_$(openssl rand -hex 16)"
+          { echo "body<<$delimiter"; cat "$RUNNER_TEMP/body.md"; echo "$delimiter"; } >> "$GITHUB_OUTPUT"
+
+  describe:
+    name: Write the release into the PR description
+    needs: preview
+    runs-on: ubuntu-latest
+    # Runs no PR code: it only writes what the read-only job worked out.
+    permissions:
+      pull-requests: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BODY: ${{ needs.preview.outputs.body }}
+        run: gh pr edit "$PR" --body "$BODY"
