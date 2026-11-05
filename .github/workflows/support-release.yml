@@ -1,0 +1,87 @@
+name: Support release
+
+# Merging a PR into a support line (support/vX.Y) publishes that line's next patch, vX.Y.(Z+1).
+# The version counts from the line's highest tag and the notes are the fix: PRs merged since it
+# (tools/release/release.py support-plan), which only ever bumps the patch and refuses a feature,
+# unlike the main line's plan. The notes go into the line's own CHANGELOG.md and the version into
+# its pyproject.toml and uv.lock in one commit, and the release is published at that commit without
+# becoming the repo's latest. Nothing is merged into main: a fix reaches main through its own PR.
+# See docs/releasing/developer-guide.md.
+#
+# Pushes go over SSH with the deploy key the release workflow uses, which the support/v* ruleset
+# lets bypass it (docs/releasing/github-setup.md).
+on:
+  push:
+    branches: ["support/v*"]
+
+concurrency:
+  group: support-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  release:
+    name: Release
+    # The bot's own changelog commit lands on the line too; it must not release again.
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    steps:
+      # The branch tip, not the pushed commit: a run queued behind another starts from that run's
+      # changelog commit, so it neither releases the same PR twice nor fails its own push.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+
+      - name: Anything to release?
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # The plan re-checks the titles it lists: one edited after merging never met the PR title check.
+          CHANGELOG_DENYLIST: ${{ vars.CHANGELOG_DENYLIST }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          # A run that pushed its tag but failed to publish the release: publish that tag, plan nothing new.
+          tag="$(git tag --points-at HEAD --list 'v*' | head -n 1)"
+          if [ -n "$tag" ] && ! gh release view "$tag" > /dev/null 2>&1; then
+            version="${tag#v}"
+            python3 tools/release/release.py changelog-section "$version" > "$RUNNER_TEMP/notes.md"
+          else
+            version="$(python3 tools/release/release.py support-plan "$BRANCH" "$RUNNER_TEMP/notes.md")"
+          fi
+          if [ -z "$version" ]; then
+            echo "::notice::Nothing to release: no fix: PR merged into $BRANCH since its last tag."
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Commit the changelog, publish the release
+        if: steps.plan.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          # A re-run after a failed publish starts from its own changelog commit: publish that, don't add another.
+          if [ "$(git log -1 --format=%s)" != "chore(release): v$VERSION" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            python3 tools/release/release.py changelog "$VERSION" "$RUNNER_TEMP/notes.md"
+            python3 tools/release/release.py set-version "$VERSION"
+            git add CHANGELOG.md
+            git add -u
+            git commit -m "chore(release): v$VERSION"
+            git push origin "HEAD:refs/heads/$BRANCH"
+          fi
+          # The deploy key pushes the tag, since the v* tag ruleset lets only deploy keys create one.
+          if ! git rev-parse -q --verify "refs/tags/v$VERSION" > /dev/null; then
+            git tag "v$VERSION" HEAD
+            git push origin "refs/tags/v$VERSION"
+          fi
+          gh release create "v$VERSION" --verify-tag --title "v$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" --latest=false
