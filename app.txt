@@ -1,4 +1,4 @@
-greeting: hi there
+greeting: hi there!
 
 ---
 
