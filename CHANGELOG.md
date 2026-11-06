@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.0 (2026-11-06)
+
+### Features
+
+- feature 1 (#169)
+
+### Fixes
+
+- reword the greeting (#158)
+
 ## v0.3.4 (2026-11-06)
 
 ### Fixes
