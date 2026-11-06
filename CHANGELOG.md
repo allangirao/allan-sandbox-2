@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1 (2026-11-06)
+
+### Fixes
+
+- punctuate the greeting (#159)
+
 ## v0.3.0 (2026-11-06)
 
 ### Features
