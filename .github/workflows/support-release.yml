@@ -1,0 +1,41 @@
+name: Support release
+
+# Merging a fix into support/vX.Y publishes that line's next patch, never main's; see docs/releasing/developer-guide.md.
+on:
+  push:
+    branches: ["support/v*"]
+
+concurrency:
+  group: support-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  release:
+    name: Release
+    # The bot's own changelog commit lands on the line too; it must not release again.
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    steps:
+      # The branch tip, not the pushed commit, so a run queued behind another starts from its changelog commit.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          # The support/v* ruleset lets only this deploy key push (docs/releasing/github-setup.md).
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+
+      - name: Publish what the line merged since its last tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # The release re-checks the titles it lists: one edited after merging never met the PR title check.
+          CHANGELOG_DENYLIST: ${{ vars.CHANGELOG_DENYLIST }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 tools/release/release.py publish "$BRANCH" "$RUNNER_TEMP/notes.md"
