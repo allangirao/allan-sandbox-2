@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.4 (2026-11-06)
+
+### Fixes
+
+- a fix whose back-merge push is refused (#135)
+
 ## v0.3.3 (2026-11-06)
 
 ### Fixes
