@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.2 (2026-11-06)
+
+### Fixes
+
+- first fix, released halfway (#133)
+
 ## v0.3.1 (2026-11-05)
 
 ### Fixes
