@@ -1,0 +1,9 @@
+greeting: hello
+
+---
+
+farewell: goodbye
+
+---
+
+footer: the end
