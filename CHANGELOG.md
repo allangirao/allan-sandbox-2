@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.2 (2026-11-06)
+
+### Fixes
+
+- patch the 0.2 line (#165)
+
 ## v0.2.1 (2026-11-06)
 
 ### Fixes
