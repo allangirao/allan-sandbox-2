@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.0 (2026-11-06)
+
+### Features
+
+- add farewell (#155)
+
 ## v0.2.1 (2026-11-06)
 
 ### Fixes
