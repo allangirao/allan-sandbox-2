@@ -1,7 +1,7 @@
 [project]
 name = "curveglass-core"
 # Written only by a release (tools/release/release.py set-version); the Version guard refuses a PR that edits it.
-version = "0.3.2"
+version = "0.3.3"
 requires-python = ">=3.11"
 
 [build-system]
