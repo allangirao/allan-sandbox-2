@@ -1,0 +1,15 @@
+# Only the autolabeler runs; types match in any case, as in tools/release/release.py.
+
+# Required by release-drafter's config schema even with the releaser off.
+template: |
+  $CHANGES
+
+autolabeler:
+  - label: major
+    title: ['/^[a-z]+(\([^)]*\))?!: /i']
+  - label: minor
+    title: ['/^feat(\([^)]*\))?: /i']
+  - label: patch
+    title: ['/^fix(\([^)]*\))?: /i']
+  - label: skip-changelog
+    title: ['/^(chore|ci|docs|refactor|test|build|perf|revert)(\([^)]*\))?: /i']
