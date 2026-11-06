@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.1 (2026-11-06)
+
+### Fixes
+
+- first fix (#168)
+
 ## v0.4.0 (2026-11-06)
 
 ### Features
